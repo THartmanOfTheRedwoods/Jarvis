@@ -1,0 +1,7 @@
+gtts~=2.3.2
+llama-cpp-python~=0.1.40
+numpy~=1.23.5
+openai-whisper @ git+https://github.com/viable-hartman/whisper.git
+pyaudio~=0.2.13
+pygame~=2.4.0
+pyzmq~=25.0.2
