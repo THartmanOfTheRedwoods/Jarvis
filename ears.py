@@ -57,10 +57,10 @@ class Ears:
 
                 print("Asking the brain to process!")
                 self.brain_socket.send_json({'ears': b''.join(frames).hex()})
+                # TODO register to body observer ZMQ allowing body to take actions like disabling ears, instead of input
                 self.stream.stop_stream()
-                inp = input('PAUSED. Press Enter to Continue.')
+                input('PAUSED. Press Enter to Continue.')
                 self.stream.start_stream()
-
 
 
 if __name__ == '__main__':
