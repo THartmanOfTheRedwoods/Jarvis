@@ -5,3 +5,4 @@ openai-whisper @ git+https://github.com/viable-hartman/whisper.git
 pyaudio~=0.2.13
 pygame~=2.4.0
 pyzmq~=25.0.2
+zeromq-pyre @ git+https://github.com/zeromq/pyre.git
