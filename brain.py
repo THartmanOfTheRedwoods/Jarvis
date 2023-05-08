@@ -5,11 +5,12 @@ import whisper
 import numpy
 import environment
 import json
-import uuid
 from pyre import Pyre
 from pyre import zhelper
 from callback_thread import CallbackThread
 from typing import List
+from environment import NETWORKS
+from afferent_neuron import AfferentNeuron
 # from pprint import pprint
 
 
@@ -30,69 +31,42 @@ class Brain:
         self.active_threads: List[CallbackThread] = []  # Holds active brain processes
         # TODO: possibly store this in memory cache like REDIS and build other types of indexes
         self.sensory_organs = {}
+        # Set up autonomous brain connectors
         # Work to/from autonomous network
         self.context = zmq.Context()
         self.autonomous_pipe = zhelper.zthread_fork(self.context, self.process_autonomous)
         # Work to/from consciousness network
         self.consciousness_pipe = zhelper.zthread_fork(self.context, self.process_consciousness)
 
+    def handle_introspection(self, n: Pyre, network: NETWORKS, message) -> str:
+        if message.decode('utf-8') == "$$STOP":
+            return "$$STOP"
+        n.shouts(network.value, message.decode('utf-8'))
+        return ""
+
+    def handle_shout(self, msg_uuid, msg_name, msg_group, cmds):
+        if self.get_type_by_organ_id(msg_uuid) == 'ears':
+            # TODO active_threads and curr_thread should be synchronized as we add more organs.
+            i = self.curr_thread % self.thread_limit
+            self.curr_thread += 1
+            # There is a thread still possibly running at circular buffer index i.
+            try:
+                if self.active_threads[i] and self.active_threads[i].is_alive():
+                    self.active_threads[i].join()  # Thus, let's wait for it before adding another.
+            except IndexError:
+                pass
+
+            self.active_threads.insert(i, CallbackThread(
+                target=self.transcribe, callback=self.interpret, callback_args=(msg_uuid, msg_group), args=cmds))
+            self.active_threads[i].start()
+
+    def handle_connection(self, msg_uuid, msg_name, network: NETWORKS, headers, cmds):
+        self.sensory_organs[msg_uuid] = headers['type']  # The brain builds a map of organ types for relay purposes.
+
     def process_autonomous(self, ctx, pipe):
-        n = Pyre(self.id)
-        n.set_header("id", self.id)
-        n.set_header("type", "brain")
-        n.join("AUTONOMOUS")
-        n.start()
-
-        poller = zmq.Poller()
-        poller.register(pipe, zmq.POLLIN)
-        # print(n.socket())
-        poller.register(n.socket(), zmq.POLLIN)
-        # print(n.socket())
-
-        while True:
-            items = dict(poller.poll())
-            # print(n.socket(), items)
-            if pipe in items and items[pipe] == zmq.POLLIN:  # Autonomous message to self
-                message = pipe.recv().decode('utf-8')
-                # print("AUTONOMOUS MESSAGE: %s" % message)
-                # message to quit
-                if message == "$$STOP":  # This will throw an error if the data is not encoded
-                    break
-                n.shouts("AUTONOMOUS", message)
-            else:  # Autonomous messages from other organs
-                cmds = n.recv()
-                msg_type = cmds.pop(0).decode('utf-8')
-                msg_uuid = uuid.UUID(bytes=cmds.pop(0))
-                msg_name = cmds.pop(0).decode('utf-8')
-                # print("NODE_MSG TYPE: %s" % msg_type)
-                # print("NODE_MSG PEER: %s" % msg_uuid)
-                # print("NODE_MSG NAME: %s" % msg_name)
-                if msg_type == "SHOUT":
-                    msg_group = cmds.pop(0).decode('utf-8')
-                    # print("NODE_MSG GROUP: %s" % msg_group)
-                    if self.get_type_by_organ_id(msg_uuid) == 'ears':
-                        # TODO active_threads and curr_thread should be synchronized as we add more organs.
-                        i = self.curr_thread % self.thread_limit
-                        self.curr_thread += 1
-                        # There is a thread still possibly running at circular buffer index i.
-                        try:
-                            if self.active_threads[i] and self.active_threads[i].is_alive():
-                                self.active_threads[i].join()  # Thus, let's wait for it before adding another.
-                        except IndexError:
-                            pass
-
-                        self.active_threads.insert(i, CallbackThread(
-                            target=self.transcribe,
-                            callback=self.interpret,
-                            callback_args=(msg_type, msg_uuid),
-                            args=cmds
-                        ))
-                        self.active_threads[i].start()
-                elif msg_type == "ENTER":  # This is where we register our organs.
-                    headers = json.loads(cmds.pop(0).decode('utf-8'))
-                    self.sensory_organs[msg_uuid] = headers['type']
-                # print("NODE_MSG CONT: %s" % cmds)
-        n.stop()
+        AfferentNeuron.process(self.id, "brain", pipe, NETWORKS.AUTONOMOUS,
+                               handle_shout=self.handle_shout,
+                               handle_connection=self.handle_connection)
 
     def get_type_by_organ_id(self, organ_id):
         return self.sensory_organs[organ_id]
@@ -121,39 +95,7 @@ class Brain:
             return result['text']
 
     def process_consciousness(self, ctx, pipe):
-        n = Pyre(self.id)
-        n.set_header("id", self.id)
-        n.set_header("type", "brain")
-        n.join("CONSCIOUSNESS")
-        n.start()
-
-        poller = zmq.Poller()
-        poller.register(pipe, zmq.POLLIN)
-        # print(n.socket())
-        poller.register(n.socket(), zmq.POLLIN)
-        # print(n.socket())
-
-        while True:
-            items = dict(poller.poll())
-            # print(n.socket(), items)
-            if pipe in items and items[pipe] == zmq.POLLIN:  # Sent from self!
-                message = pipe.recv().decode('utf-8')
-                print("CONSCIOUSNESS MESSAGE: %s" % message)
-                # message to quit
-                if message == "$$STOP":  # This will throw an error if the data is not encoded
-                    break
-                n.shouts("CONSCIOUSNESS", message)
-            else:  # Sent from peer organs
-                cmds = n.recv()
-                msg_type = cmds.pop(0).decode('utf-8')
-                msg_uuid = uuid.UUID(bytes=cmds.pop(0))
-                msg_name = cmds.pop(0).decode('utf-8')
-                # print("NODE_MSG TYPE: %s" % msg_type)
-                # print("NODE_MSG PEER: %s" % msg_uuid)
-                # print("NODE_MSG NAME: %s" % msg_name)
-                print("NODE_MSG CONT: %s" % cmds)
-
-        n.stop()
+        AfferentNeuron.process(self.id, "brain", pipe, NETWORKS.CONSCIOUSNESS, self.handle_introspection)
 
 
 if __name__ == '__main__':

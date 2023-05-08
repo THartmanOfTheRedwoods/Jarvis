@@ -4,11 +4,12 @@ import struct
 import pyaudio
 import math
 import zmq
-import environment
+from environment import SHORT_NORMALIZE, NETWORKS
 import json
 import uuid
 from pyre import Pyre
 from pyre import zhelper
+from afferent_neuron import AfferentNeuron
 
 
 class Ears:
@@ -24,8 +25,6 @@ class Ears:
         self.listen_length = 5
         self.threshold = 20
         # Set up autonomous brain connectors
-        # Start your:
-        # result manager (Consciousness) and workers (Brain) before you start your producers (Eyes, Ears, etc.)
         self.context = zmq.Context()
         self.autonomous_pipe = zhelper.zthread_fork(self.context, self.ears_message)
         self.stream = self.p.open(
@@ -33,50 +32,16 @@ class Ears:
             frames_per_buffer=self.chunk_size
         )
 
+    def handle_introspection(self, n: Pyre, network: NETWORKS, message) -> str:
+        try:
+            if message.decode('utf-8') == "$$STOP":  # This will throw an error if the data is not encoded
+                return "$$STOP"
+        except UnicodeDecodeError:
+            n.shouts(network.value, message.hex())
+            return ""
+
     def ears_message(self, ctx, pipe):
-        n = Pyre(self.id)
-        n.set_header("id", self.id)
-        n.set_header("type", "ears")
-        n.join("AUTONOMOUS")
-        n.start()
-
-        poller = zmq.Poller()
-        poller.register(pipe, zmq.POLLIN)
-        # print(n.socket())
-        poller.register(n.socket(), zmq.POLLIN)
-        # print(n.socket())
-
-        while True:
-            items = dict(poller.poll())
-            # print(n.socket(), items)
-            if pipe in items and items[pipe] == zmq.POLLIN:  # Sent from self
-                message = pipe.recv()
-                # print("AUTONOMOUS MESSAGE: %s" % message)
-                # message to quit
-                try:
-                    if message.decode('utf-8') == "$$STOP":  # This will throw an error if the data is not encoded
-                        break
-                except UnicodeDecodeError:
-                    n.shouts("AUTONOMOUS", message.hex())
-            else:  # Sent from peer organ
-                # TODO: decide what to do with message based on headers.
-                cmds = n.recv()
-                msg_type = cmds.pop(0).decode('utf-8')
-                msg_uuid = uuid.UUID(bytes=cmds.pop(0))
-                msg_name = cmds.pop(0).decode('utf-8')
-                # print("NODE_MSG TYPE: %s" % msg_type)
-                # print("NODE_MSG PEER: %s" % msg_uuid)
-                # print("NODE_MSG NAME: %s" % msg_name)
-                if msg_type == "SHOUT":
-                    msg_group = cmds.pop(0).decode('utf-8')
-                    # print("NODE_MSG GROUP: %s" % msg_group)
-                elif msg_type == "ENTER":
-                    pass
-                    # headers = json.loads(cmds.pop(0).decode('utf-8'))
-                    # for key in headers:
-                    #    print("key = {0}, value = {1}".format(key, headers[key]))
-                # print("NODE_MSG CONT: %s" % cmds)
-        n.stop()
+        AfferentNeuron.process(self.id, "ears", pipe, NETWORKS.AUTONOMOUS, self.handle_introspection)
 
     @staticmethod
     def rms(frame):
@@ -86,7 +51,7 @@ class Ears:
 
         sum_squares = 0.0
         for sample in shorts:
-            n = sample * environment.SHORT_NORMALIZE
+            n = sample * SHORT_NORMALIZE
             sum_squares += n * n
         rms = math.pow(sum_squares / count, 0.5)
 
